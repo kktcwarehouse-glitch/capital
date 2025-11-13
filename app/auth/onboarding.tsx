@@ -28,50 +28,24 @@ export default function OnboardingScreen() {
 
     setLoading(true);
 
-    try {
-      // Check if profile already exists
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
+    const { error } = await supabase.from('profiles').insert({
+      id: user.id,
+      email: user.email!,
+      role: selectedRole,
+    });
 
-      if (!existingProfile) {
-        const { error } = await supabase.from('profiles').insert({
-          id: user.id,
-          email: user.email!,
-          role: selectedRole,
-        });
-
-        if (error) {
-          console.error('Error creating profile:', error);
-          setLoading(false);
-          return;
-        }
-      } else if (existingProfile.role !== selectedRole) {
-        // Update role if it changed
-        const { error } = await supabase
-          .from('profiles')
-          .update({ role: selectedRole })
-          .eq('id', user.id);
-
-        if (error) {
-          console.error('Error updating profile role:', error);
-          setLoading(false);
-          return;
-        }
-      }
-
-      await refreshProfile();
-
-      if (selectedRole === 'startup') {
-        router.replace('/auth/setup-startup');
-      } else {
-        router.replace('/auth/setup-investor');
-      }
-    } catch (err) {
-      console.error('Error in onboarding:', err);
+    if (error) {
+      console.error('Error creating profile:', error);
       setLoading(false);
+      return;
+    }
+
+    await refreshProfile();
+
+    if (selectedRole === 'startup') {
+      router.replace('/auth/setup-startup');
+    } else {
+      router.replace('/auth/setup-investor');
     }
   };
 
