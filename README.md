@@ -171,3 +171,4 @@ For issues or questions:
 
 **Built with ❤️ using Expo and Supabase**
 "# LINK" 
+"# LINK" 
