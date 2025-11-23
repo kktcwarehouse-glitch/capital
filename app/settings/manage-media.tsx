@@ -20,7 +20,20 @@ import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Video, FileText } from '
 import { StartupProfile, StartupMedia } from '@/types';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { decode } from 'base64-arraybuffer';
+
+type PickerMediaKind = 'image' | 'video';
+
+const getPickerMediaTypes = (kind: PickerMediaKind): ImagePicker.ImagePickerOptions['mediaTypes'] => {
+  const nextGenMediaTypes: ImagePicker.MediaType[] = kind === 'image' ? ['images'] : ['videos'];
+
+  // Expo SDK 49+ accepts arrays of MediaType strings (preferred, no warnings).
+  if (Array.isArray(nextGenMediaTypes)) {
+    return nextGenMediaTypes;
+  }
+
+  // Fallback for very old Expo SDKs that still rely on MediaTypeOptions.
+  return kind === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos;
+};
 
 export default function ManageMediaScreen() {
   const colorScheme = useColorScheme();
@@ -81,13 +94,20 @@ export default function ManageMediaScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: getPickerMediaTypes('image'),
       allowsEditing: true,
       quality: 0.8,
     });
 
     if (!result.canceled && result.assets[0]) {
-      uploadMedia(result.assets[0].uri, 'image', result.assets[0].fileName || 'image.jpg');
+      const asset = result.assets[0];
+      uploadMedia({
+        uri: asset.uri,
+        type: 'image',
+        fileName: asset.fileName || 'image.jpg',
+        mimeType: asset.mimeType || 'image/jpeg',
+        size: asset.fileSize,
+      });
     }
   };
 
@@ -105,13 +125,20 @@ export default function ManageMediaScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      mediaTypes: getPickerMediaTypes('video'),
       allowsEditing: true,
       quality: 0.8,
     });
 
     if (!result.canceled && result.assets[0]) {
-      uploadMedia(result.assets[0].uri, 'video', result.assets[0].fileName || 'video.mp4');
+      const asset = result.assets[0];
+      uploadMedia({
+        uri: asset.uri,
+        type: 'video',
+        fileName: asset.fileName || 'video.mp4',
+        mimeType: asset.mimeType || 'video/mp4',
+        size: asset.fileSize,
+      });
     }
   };
 
@@ -127,28 +154,46 @@ export default function ManageMediaScreen() {
     });
 
     if (!result.canceled && result.assets[0]) {
-      uploadMedia(result.assets[0].uri, 'document', result.assets[0].name);
+      const asset = result.assets[0];
+      uploadMedia({
+        uri: asset.uri,
+        type: 'document',
+        fileName: asset.name,
+        mimeType: asset.mimeType || 'application/octet-stream',
+        size: asset.size,
+      });
     }
   };
 
-  const uploadMedia = async (uri: string, type: 'image' | 'video' | 'document', fileName: string) => {
+  const uploadMedia = async ({
+    uri,
+    type,
+    fileName,
+    mimeType,
+    size,
+  }: {
+    uri: string;
+    type: 'image' | 'video' | 'document';
+    fileName: string;
+    mimeType?: string;
+    size?: number | null;
+  }) => {
     if (!startupProfile) return;
 
     setUploading(true);
 
     try {
       const response = await fetch(uri);
-      const blob = await response.blob();
-      const arrayBuffer = await blob.arrayBuffer();
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const arrayBuffer = await response.arrayBuffer();
+      const fileBytes = new Uint8Array(arrayBuffer);
 
       const bucketName = type === 'image' ? 'startup-images' : type === 'video' ? 'startup-videos' : 'startup-documents';
       const filePath = `${user!.id}/${Date.now()}-${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from(bucketName)
-        .upload(filePath, decode(base64), {
-          contentType: blob.type,
+        .upload(filePath, fileBytes, {
+          contentType: mimeType,
           upsert: false,
         });
 
@@ -170,8 +215,8 @@ export default function ManageMediaScreen() {
           media_type: type,
           file_url: urlData.publicUrl,
           file_name: fileName,
-          file_size: blob.size,
-          mime_type: blob.type,
+          file_size: size ?? fileBytes.byteLength,
+          mime_type: mimeType || 'application/octet-stream',
           display_order: media.length,
           is_primary: media.length === 0 && type === 'image',
         });
@@ -201,6 +246,9 @@ export default function ManageMediaScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            if (!startupProfile) {
+              return;
+            }
             const { error } = await supabase
               .from('startup_media')
               .delete()
@@ -304,11 +352,12 @@ export default function ManageMediaScreen() {
                       {item.file_name}
                     </Text>
                     <View style={styles.mediaActions}>
-                      {item.media_type === 'image' && !item.is_primary && (
+                      {item.media_type === 'image' && !item.is_primary && startupProfile && (
                         <TouchableOpacity
                           style={styles.actionButton}
                           onPress={async () => {
                             // Set as primary
+                            if (!startupProfile) return;
                             await supabase
                               .from('startup_media')
                               .update({ is_primary: false })

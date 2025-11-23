@@ -40,16 +40,28 @@ This guide will help you set up the FundLink database using Supabase.
    EXPO_PUBLIC_ENVIRONMENT=development
    ```
 
-## Step 4: Run Database Migrations
+## Step 4: Reset or Prepare the Database
+
+If this project previously pointed at a different Supabase instance, or you simply want to wipe the slate clean, do the following before running the migration:
+
+1. In the Supabase dashboard open **Project Settings → General** and click **Reset Project**.\
+   _⚠️ This permanently removes every table, policy, bucket and piece of data in the project._
+2. Alternatively, in the SQL editor run:
+   ```sql
+   drop schema if exists public cascade;
+   create schema public;
+   ```
+3. Re-copy the **Project URL** and **anon** key from **Settings → API** and update both `.env` and `app.json`.
+
+## Step 5: Run the FundLink Migration
 
 ### Option A: Using Supabase Dashboard (Recommended)
 
 1. Go to your Supabase project dashboard
 2. Navigate to **SQL Editor**
-3. Copy the contents of `supabase/migrations/20251005193632_create_fundlink_schema.sql`
-4. Paste it into the SQL editor
+3. Open `supabase/migrations/20251113154500_initialize_fundlink_schema.sql`
+4. Copy the entire file into the SQL editor (it is safe to run more than once; it drops stale objects and recreates everything)
 5. Click **Run** to execute the migration
-6. Repeat for `supabase/migrations/20251008115958_add_startup_media_tables.sql`
 
 ### Option B: Using Supabase CLI
 
@@ -68,12 +80,12 @@ This guide will help you set up the FundLink database using Supabase.
    supabase link --project-ref your-project-id
    ```
 
-4. Run migrations:
+4. Push the migration:
    ```bash
    supabase db push
    ```
 
-## Step 5: Verify Database Setup
+## Step 6: Verify Database Setup
 
 After running migrations, verify these tables exist:
 
@@ -86,15 +98,17 @@ After running migrations, verify these tables exist:
 - ✅ `subscriptions`
 - ✅ `startup_media`
 
-## Step 6: Configure Storage Buckets
+## Step 7: Configure Storage Buckets and Policies
 
-The media migration should have created these storage buckets:
+### Create Storage Buckets
 
-- ✅ `startup-images` (public)
-- ✅ `startup-videos` (public)
-- ✅ `startup-documents` (private)
+1. Go to **Storage** → **Buckets** in your Supabase dashboard
+2. Click **New bucket** and create these three buckets:
+   - **Name**: `startup-images`, **Public**: ✅ (checked)
+   - **Name**: `startup-videos`, **Public**: ✅ (checked)
+   - **Name**: `startup-documents`, **Public**: ❌ (unchecked)
 
-If they weren't created, run this SQL in the Supabase dashboard:
+Alternatively, run this SQL in the SQL Editor:
 
 ```sql
 INSERT INTO storage.buckets (id, name, public)
@@ -105,7 +119,18 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 ```
 
-## Step 7: Test the Connection
+### Set Up Storage Policies
+
+After creating the buckets, you **must** run the storage policies migration:
+
+1. Go to **SQL Editor** in your Supabase dashboard
+2. Open `supabase/migrations/20251113154501_setup_storage_policies.sql`
+3. Copy the entire file and paste it into the SQL editor
+4. Click **Run** to execute
+
+This creates the Row Level Security policies that allow authenticated users to upload files to the buckets. Without these policies, you'll get "row violates row-level security policy" errors when trying to upload media.
+
+## Step 8: Test the Connection
 
 1. Start your development server:
    ```bash
@@ -116,6 +141,10 @@ ON CONFLICT (id) DO NOTHING;
 3. Try creating a new account to test the setup
 
 ## Troubleshooting
+
+### Migration reruns
+
+- The new `20251113154500_initialize_fundlink_schema.sql` script is idempotent—running it again will drop and recreate the public schema objects so you always end up with a clean copy of the FundLink data model.
 
 ### Common Issues
 
@@ -160,6 +189,7 @@ Once your database is set up:
 ---
 
 **Need help?** Check the troubleshooting section or reach out to the development team.
+
 
 
 
