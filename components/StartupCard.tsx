@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useColorScheme } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, Image } from 'react-native';
 import { Colors } from '@/constants/Colors';
 import { StartupProfile } from '@/types';
-import { MapPin, TrendingUp, Eye, Heart } from 'lucide-react-native';
+import { MapPin, TrendingUp, Eye, Heart, Star } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 
@@ -62,13 +62,36 @@ export function StartupCard({ startup, onPress, showStats = true }: Props) {
     return `$${(amount / 1000).toFixed(0)}K`;
   };
 
+  const isFeatured = Boolean(startup.is_featured);
+  
+  // Debug logging
+  useEffect(() => {
+    if (startup.is_featured) {
+      console.log(`[StartupCard] ${startup.company_name} is featured:`, startup.is_featured);
+    }
+  }, [startup.is_featured, startup.company_name]);
+
   return (
-    <TouchableOpacity style={styles.card} onPress={handlePress}>
+    <TouchableOpacity style={[styles.card, isFeatured && styles.featuredCard]} onPress={handlePress}>
+      {isFeatured && (
+        <View style={styles.featuredBadge}>
+          <Star size={14} color="#FFD700" fill="#FFD700" />
+          <Text style={styles.featuredBadgeText}>Featured</Text>
+        </View>
+      )}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>
-            {startup.company_name.charAt(0).toUpperCase()}
-          </Text>
+          {startup.logo_url ? (
+            <Image
+              source={{ uri: startup.logo_url }}
+              style={styles.logoImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <Text style={styles.logoText}>
+              {startup.company_name.charAt(0).toUpperCase()}
+            </Text>
+          )}
         </View>
         <View style={styles.info}>
           <Text style={styles.companyName}>{startup.company_name}</Text>
@@ -125,6 +148,35 @@ function createStyles(colors: typeof Colors.light) {
       borderWidth: 1,
       borderColor: colors.border,
       gap: 12,
+      position: 'relative',
+    },
+    featuredCard: {
+      borderColor: '#FFD700',
+      borderWidth: 3,
+      shadowColor: '#FFD700',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.6,
+      shadowRadius: 20,
+      elevation: 12,
+      backgroundColor: colors.card,
+    },
+    featuredBadge: {
+      position: 'absolute',
+      top: 12,
+      right: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(255, 215, 0, 0.9)',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 20,
+      zIndex: 10,
+    },
+    featuredBadgeText: {
+      color: '#000000',
+      fontSize: 11,
+      fontWeight: '700',
     },
     header: {
       flexDirection: 'row',
@@ -138,6 +190,11 @@ function createStyles(colors: typeof Colors.light) {
       backgroundColor: colors.primary,
       alignItems: 'center',
       justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    logoImage: {
+      width: '100%',
+      height: '100%',
     },
     logoText: {
       color: '#FFFFFF',

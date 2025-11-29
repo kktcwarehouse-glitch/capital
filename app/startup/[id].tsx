@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Image,
-  Dimensions,
   FlatList,
+  Linking,
+  Modal,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
@@ -27,11 +29,14 @@ import {
   Heart,
   Globe,
   FileText,
-  Download,
+  X,
+  DollarSign,
+  Percent,
+  Briefcase,
+  Handshake,
 } from 'lucide-react-native';
 import { Video as VideoPlayer, ResizeMode } from 'expo-av';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import * as WebBrowser from 'expo-web-browser';
 
 export default function StartupDetailScreen() {
   const colorScheme = useColorScheme();
@@ -46,7 +51,8 @@ export default function StartupDetailScreen() {
   const [media, setMedia] = useState<StartupMedia[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -98,10 +104,12 @@ export default function StartupDetailScreen() {
   const recordView = async () => {
     if (!user || !id || profile?.role === 'startup') return;
 
+    // Try to insert, ignore if already exists (due to unique constraint)
     await supabase.from('profile_views').insert({
       startup_id: id,
       viewer_id: user.id,
-    });
+    }).select();
+    // Errors are expected and fine - it means they already viewed this profile
   };
 
   const toggleFavorite = async () => {
@@ -150,6 +158,43 @@ export default function StartupDetailScreen() {
     return `$${(amount / 1000).toFixed(0)}K`;
   };
 
+  const openDocument = async (url: string) => {
+    try {
+      await WebBrowser.openBrowserAsync(url, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+      });
+    } catch (error) {
+      console.error('Error opening document:', error);
+      // Fallback to Linking if WebBrowser fails
+      try {
+        const supported = await Linking.canOpenURL(url);
+        if (supported) {
+          await Linking.openURL(url);
+        } else {
+          Alert.alert('Error', 'Cannot open this file type');
+        }
+      } catch (linkError) {
+        Alert.alert('Error', 'Failed to open document');
+      }
+    }
+  };
+
+  const openImage = (url: string) => {
+    setSelectedImage(url);
+  };
+
+  const openVideo = async (url: string) => {
+    try {
+      await WebBrowser.openBrowserAsync(url, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+      });
+    } catch (error) {
+      console.error('Error opening video:', error);
+      // Fallback: open in modal
+      setSelectedVideo(url);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -172,6 +217,52 @@ export default function StartupDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Image Modal */}
+      <Modal
+        visible={selectedImage !== null}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedImage(null)}>
+        <View style={styles.modalContainer}>
+          <TouchableOpacity
+            style={styles.modalCloseButton}
+            onPress={() => setSelectedImage(null)}>
+            <X size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          {selectedImage && (
+            <Image
+              source={{ uri: selectedImage }}
+              style={styles.modalImage}
+              resizeMode="contain"
+            />
+          )}
+        </View>
+      </Modal>
+
+      {/* Video Modal */}
+      <Modal
+        visible={selectedVideo !== null}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedVideo(null)}>
+        <View style={styles.modalContainer}>
+          <TouchableOpacity
+            style={styles.modalCloseButton}
+            onPress={() => setSelectedVideo(null)}>
+            <X size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          {selectedVideo && (
+            <VideoPlayer
+              source={{ uri: selectedVideo }}
+              style={styles.modalVideo}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+            />
+          )}
+        </View>
+      </Modal>
+
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -193,64 +284,18 @@ export default function StartupDetailScreen() {
 
       <ScrollView>
         <View style={styles.content}>
-          {media.filter(m => m.media_type === 'image').length > 0 && (
-            <View style={styles.mediaSection}>
-              <FlatList
-                data={media.filter(m => m.media_type === 'image')}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                onMomentumScrollEnd={(event) => {
-                  const index = Math.floor(
-                    event.nativeEvent.contentOffset.x / SCREEN_WIDTH
-                  );
-                  setCurrentImageIndex(index);
-                }}
-                renderItem={({ item }) => (
-                  <Image
-                    source={{ uri: item.file_url }}
-                    style={styles.carouselImage}
-                    resizeMode="cover"
-                  />
-                )}
-                keyExtractor={(item) => item.id}
-              />
-              {media.filter(m => m.media_type === 'image').length > 1 && (
-                <View style={styles.pagination}>
-                  {media.filter(m => m.media_type === 'image').map((_, index) => (
-                    <View
-                      key={index}
-                      style={[
-                        styles.paginationDot,
-                        index === currentImageIndex && styles.paginationDotActive,
-                      ]}
-                    />
-                  ))}
-                </View>
-              )}
-            </View>
-          )}
-
-          {media.filter(m => m.media_type === 'video').length > 0 && (
-            <View style={styles.videoSection}>
-              <Text style={styles.sectionTitle}>Videos</Text>
-              {media.filter(m => m.media_type === 'video').map((item) => (
-                <View key={item.id} style={styles.videoContainer}>
-                  <VideoPlayer
-                    source={{ uri: item.file_url }}
-                    style={styles.video}
-                    useNativeControls
-                    resizeMode={ResizeMode.CONTAIN}
-                  />
-                </View>
-              ))}
-            </View>
-          )}
-
           <View style={styles.logoContainer}>
-            <Text style={styles.logoText}>
-              {startup.company_name.charAt(0).toUpperCase()}
-            </Text>
+            {startup.logo_url ? (
+              <Image
+                source={{ uri: startup.logo_url }}
+                style={styles.logoImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <Text style={styles.logoText}>
+                {startup.company_name.charAt(0).toUpperCase()}
+              </Text>
+            )}
           </View>
 
           <Text style={styles.companyName}>{startup.company_name}</Text>
@@ -277,6 +322,111 @@ export default function StartupDetailScreen() {
                 <Text style={styles.fundingAmount}>
                   {formatFunding(startup.funding_goal)}
                 </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Images and Videos Row */}
+          {(media.filter(m => m.media_type === 'image').length > 0 || 
+            media.filter(m => m.media_type === 'video').length > 0) && (
+            <View style={styles.mediaSection}>
+              <Text style={styles.sectionTitle}>Media</Text>
+              <FlatList
+                data={media.filter(m => m.media_type === 'image' || m.media_type === 'video')}
+                horizontal
+                showsHorizontalScrollIndicator={true}
+                contentContainerStyle={styles.mediaScrollContent}
+                renderItem={({ item }) => {
+                  if (item.media_type === 'image') {
+                    return (
+                      <TouchableOpacity
+                        style={styles.mediaItem}
+                        onPress={() => openImage(item.file_url)}>
+                        <Image
+                          source={{ uri: item.file_url }}
+                          style={styles.mediaThumbnail}
+                          resizeMode="cover"
+                        />
+                        <View style={styles.mediaLabel}>
+                          <Text style={styles.mediaLabelText} numberOfLines={1}>
+                            {item.file_name}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  } else {
+                    return (
+                      <TouchableOpacity
+                        style={styles.mediaItem}
+                        onPress={() => openVideo(item.file_url)}>
+                        <View style={[styles.mediaThumbnail, styles.videoThumbnail]}>
+                          <VideoPlayer
+                            source={{ uri: item.file_url }}
+                            style={styles.mediaVideo}
+                            useNativeControls={false}
+                            resizeMode={ResizeMode.COVER}
+                            shouldPlay={false}
+                          />
+                          <View style={styles.playButtonOverlay}>
+                            <View style={styles.playButton}>
+                              <Text style={styles.playButtonText}>▶</Text>
+                            </View>
+                          </View>
+                        </View>
+                        <View style={styles.mediaLabel}>
+                          <Text style={styles.mediaLabelText} numberOfLines={1}>
+                            {item.file_name}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  }
+                }}
+                keyExtractor={(item) => item.id}
+              />
+            </View>
+          )}
+
+          {/* Pitch Deck Section */}
+          {startup.pitch_deck_url && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Pitch Deck</Text>
+              <TouchableOpacity
+                style={styles.pitchDeckCard}
+                onPress={() => openDocument(startup.pitch_deck_url!)}>
+                <FileText size={24} color={colors.primary} />
+                <View style={styles.pitchDeckInfo}>
+                  <Text style={styles.pitchDeckTitle}>View Pitch Deck</Text>
+                  <Text style={styles.pitchDeckSubtitle}>PDF Presentation</Text>
+                </View>
+                <Globe size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Documents Section */}
+          {media.filter(m => m.media_type === 'document').length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Documents</Text>
+              <View style={styles.documentsContainer}>
+                {media.filter(m => m.media_type === 'document').map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.documentCard}
+                    onPress={() => openDocument(item.file_url)}>
+                    <FileText size={24} color={colors.primary} />
+                    <View style={styles.documentInfo}>
+                      <Text style={styles.documentName} numberOfLines={1}>
+                        {item.file_name}
+                      </Text>
+                      {item.file_size && (
+                        <Text style={styles.documentSize}>
+                          {(item.file_size / 1024 / 1024).toFixed(2)} MB
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
           )}
@@ -323,33 +473,130 @@ export default function StartupDetailScreen() {
             </View>
           )}
 
-          {media.filter(m => m.media_type === 'document').length > 0 && (
+          {/* Founders Section */}
+          {startup.founders && Array.isArray(startup.founders) && startup.founders.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Documents</Text>
-              <View style={styles.documentsContainer}>
-                {media.filter(m => m.media_type === 'document').map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.documentCard}
-                    onPress={() => {
-                      if (item.file_url) {
-                        console.log('Download document:', item.file_url);
-                      }
-                    }}>
-                    <FileText size={24} color={colors.primary} />
-                    <View style={styles.documentInfo}>
-                      <Text style={styles.documentName} numberOfLines={1}>
-                        {item.file_name}
-                      </Text>
-                      {item.file_size && (
-                        <Text style={styles.documentSize}>
-                          {(item.file_size / 1024 / 1024).toFixed(2)} MB
-                        </Text>
+              <Text style={styles.sectionTitle}>Founders</Text>
+              <View style={styles.foundersContainer}>
+                {startup.founders.map((founder, index) => (
+                  <View key={index} style={styles.founderCard}>
+                    <View style={styles.founderPhotoContainer}>
+                      {founder.photo_url ? (
+                        <Image
+                          source={{ uri: founder.photo_url }}
+                          style={styles.founderPhoto}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.founderPhotoPlaceholder}>
+                          <Text style={styles.founderPhotoPlaceholderText}>
+                            {founder.name?.charAt(0).toUpperCase() || '?'}
+                          </Text>
+                        </View>
                       )}
                     </View>
-                    <Download size={20} color={colors.textSecondary} />
-                  </TouchableOpacity>
+                    <Text style={styles.founderName}>{founder.name}</Text>
+                    {founder.key_roles && (
+                      <Text style={styles.founderRoles}>{founder.key_roles}</Text>
+                    )}
+                    {founder.previous_experience && (
+                      <Text style={styles.founderExperience} numberOfLines={3}>
+                        {founder.previous_experience}
+                      </Text>
+                    )}
+                  </View>
                 ))}
+              </View>
+            </View>
+          )}
+
+          {/* Business Metrics Section */}
+          {(startup.monthly_recurring_revenue || startup.growth_percentage || startup.important_partnerships) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Business Metrics</Text>
+              <View style={styles.metricsCard}>
+                {startup.monthly_recurring_revenue && (
+                  <View style={styles.metricRow}>
+                    <DollarSign size={20} color={colors.primary} />
+                    <View style={styles.metricContent}>
+                      <Text style={styles.metricLabel}>Monthly Recurring Revenue (MRR)</Text>
+                      <Text style={styles.metricValue}>
+                        ${(startup.monthly_recurring_revenue / 1000).toFixed(0)}K
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                {startup.growth_percentage && startup.growth_period_months && (
+                  <View style={styles.metricRow}>
+                    <TrendingUp size={20} color={colors.primary} />
+                    <View style={styles.metricContent}>
+                      <Text style={styles.metricLabel}>Growth</Text>
+                      <Text style={styles.metricValue}>
+                        {startup.growth_percentage}% over {startup.growth_period_months} months
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                {startup.important_partnerships && (
+                  <View style={styles.metricRow}>
+                    <Handshake size={20} color={colors.primary} />
+                    <View style={styles.metricContent}>
+                      <Text style={styles.metricLabel}>Important Partnerships</Text>
+                      <Text style={styles.metricValue}>{startup.important_partnerships}</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* Investment Details Section */}
+          {(startup.equity_offered || startup.company_valuation_pre_money || startup.minimum_investment) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Investment Details</Text>
+              <View style={styles.investmentCard}>
+                {startup.funding_goal > 0 && (
+                  <View style={styles.investmentRow}>
+                    <DollarSign size={20} color={colors.primary} />
+                    <View style={styles.investmentContent}>
+                      <Text style={styles.investmentLabel}>Amount Needed</Text>
+                      <Text style={styles.investmentValue}>
+                        {formatFunding(startup.funding_goal)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                {startup.equity_offered && (
+                  <View style={styles.investmentRow}>
+                    <Percent size={20} color={colors.primary} />
+                    <View style={styles.investmentContent}>
+                      <Text style={styles.investmentLabel}>Equity Offered</Text>
+                      <Text style={styles.investmentValue}>{startup.equity_offered}%</Text>
+                    </View>
+                  </View>
+                )}
+                {startup.company_valuation_pre_money && (
+                  <View style={styles.investmentRow}>
+                    <Briefcase size={20} color={colors.primary} />
+                    <View style={styles.investmentContent}>
+                      <Text style={styles.investmentLabel}>Company Valuation (Pre-money)</Text>
+                      <Text style={styles.investmentValue}>
+                        {formatFunding(startup.company_valuation_pre_money)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                {startup.minimum_investment && (
+                  <View style={styles.investmentRow}>
+                    <DollarSign size={20} color={colors.primary} />
+                    <View style={styles.investmentContent}>
+                      <Text style={styles.investmentLabel}>Minimum Investment</Text>
+                      <Text style={styles.investmentValue}>
+                        {formatFunding(startup.minimum_investment)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
               </View>
             </View>
           )}
@@ -412,6 +659,11 @@ function createStyles(colors: typeof Colors.light) {
       justifyContent: 'center',
       marginBottom: 16,
       alignSelf: 'center',
+      overflow: 'hidden',
+    },
+    logoImage: {
+      width: '100%',
+      height: '100%',
     },
     logoText: {
       color: '#FFFFFF',
@@ -537,42 +789,74 @@ function createStyles(colors: typeof Colors.light) {
     mediaSection: {
       marginBottom: 24,
     },
-    carouselImage: {
-      width: SCREEN_WIDTH,
-      height: 300,
-      backgroundColor: colors.card,
+    mediaScrollContent: {
+      paddingRight: 24,
     },
-    pagination: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      gap: 8,
-      paddingVertical: 12,
-    },
-    paginationDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: colors.border,
-    },
-    paginationDotActive: {
-      backgroundColor: colors.primary,
-      width: 24,
-    },
-    videoSection: {
-      marginBottom: 24,
-    },
-    videoContainer: {
-      marginBottom: 12,
-    },
-    video: {
-      width: '100%',
-      height: 250,
+    mediaItem: {
+      width: 200,
+      marginRight: 12,
       backgroundColor: colors.card,
       borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
       overflow: 'hidden',
+    },
+    mediaThumbnail: {
+      width: '100%',
+      height: 150,
+      backgroundColor: colors.background,
+    },
+    videoThumbnail: {
+      backgroundColor: colors.card,
+    },
+    documentThumbnail: {
+      backgroundColor: `${colors.primary}10`,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    mediaVideo: {
+      width: '100%',
+      height: '100%',
+    },
+    mediaLabel: {
+      padding: 12,
+    },
+    mediaLabelText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: colors.text,
+      marginBottom: 4,
+    },
+    mediaSizeText: {
+      fontSize: 11,
+      color: colors.textSecondary,
     },
     documentsContainer: {
       gap: 12,
+    },
+    pitchDeckCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 16,
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: colors.primary,
+      marginBottom: 12,
+    },
+    pitchDeckInfo: {
+      flex: 1,
+    },
+    pitchDeckTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 4,
+    },
+    pitchDeckSubtitle: {
+      fontSize: 13,
+      color: colors.textSecondary,
     },
     documentCard: {
       flexDirection: 'row',
@@ -596,6 +880,163 @@ function createStyles(colors: typeof Colors.light) {
     documentSize: {
       fontSize: 12,
       color: colors.textSecondary,
+    },
+    modalContainer: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.95)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    modalCloseButton: {
+      position: 'absolute',
+      top: 50,
+      right: 20,
+      zIndex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+      borderRadius: 20,
+      padding: 10,
+    },
+    modalImage: {
+      width: '95%',
+      height: '80%',
+    },
+    modalVideo: {
+      width: '95%',
+      height: '80%',
+    },
+    foundersContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 16,
+    },
+    founderCard: {
+      width: '47%',
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+    },
+    founderPhotoContainer: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      backgroundColor: `${colors.primary}20`,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      marginBottom: 12,
+    },
+    founderPhoto: {
+      width: '100%',
+      height: '100%',
+    },
+    founderPhotoPlaceholder: {
+      width: '100%',
+      height: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    founderPhotoPlaceholderText: {
+      fontSize: 32,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    founderName: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 4,
+      textAlign: 'center',
+    },
+    founderRoles: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.primary,
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    founderExperience: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 16,
+    },
+    metricsCard: {
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 16,
+    },
+    metricRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+    },
+    metricContent: {
+      flex: 1,
+    },
+    metricLabel: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      marginBottom: 4,
+    },
+    metricValue: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    investmentCard: {
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 16,
+    },
+    investmentRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+    },
+    investmentContent: {
+      flex: 1,
+    },
+    investmentLabel: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      marginBottom: 4,
+    },
+    investmentValue: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    playButtonOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    },
+    playButton: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    playButtonText: {
+      fontSize: 24,
+      color: colors.primary,
+      marginLeft: 4,
     },
   });
 }

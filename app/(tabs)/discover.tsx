@@ -17,8 +17,9 @@ import { StartupProfile } from '@/types';
 import { StartupCard } from '@/components/StartupCard';
 import { StartupImageCard } from '@/components/StartupImageCard';
 import { useAuth } from '@/lib/auth-context';
+import { FILTER_SECTORS } from '@/constants/Sectors';
 
-const sectors = ['All', 'FinTech', 'HealthTech', 'EdTech', 'E-commerce', 'SaaS', 'AI/ML', 'Blockchain'];
+const sectors = FILTER_SECTORS;
 const stages = ['All', 'Idea', 'Pre-seed', 'Seed', 'Series A', 'Series B', 'Series C+'];
 
 export default function DiscoverScreen() {
@@ -58,9 +59,19 @@ export default function DiscoverScreen() {
         query = query.neq('user_id', user.id);
       }
 
-      const { data } = await query;
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error fetching startups:', error);
+      }
 
       if (data) {
+        // Debug: Log featured startups
+        const featured = data.filter(s => s.is_featured);
+        if (featured.length > 0) {
+          console.log('[Discover] Featured startups found:', featured.map(s => s.company_name));
+        }
+        console.log('[Discover] Total startups:', data.length, 'Featured:', featured.length);
         setStartups(data);
       }
     } catch (error) {

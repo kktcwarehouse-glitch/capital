@@ -13,7 +13,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
 import { StartupProfile, InvestorProfile, StartupMedia } from '@/types';
-import { LogOut, CreditCard as Edit, User, Building2, TrendingUp, Image as ImageIcon, Video, FileText, Play } from 'lucide-react-native';
+import { LogOut, CreditCard as Edit, User, Building2, TrendingUp, Image as ImageIcon, Video, FileText, Play, Shield } from 'lucide-react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Image, FlatList, Dimensions } from 'react-native';
 
@@ -22,7 +22,7 @@ export default function ProfileScreen() {
   const colors = colorScheme === 'dark' ? Colors.dark : Colors.light;
   const styles = createStyles(colors);
 
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, isAdmin } = useAuth();
   const [roleProfile, setRoleProfile] = useState<StartupProfile | InvestorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [media, setMedia] = useState<StartupMedia[]>([]);
@@ -42,6 +42,13 @@ export default function ProfileScreen() {
   const fetchRoleProfile = async () => {
     if (!profile) {
       setLoading(false);
+      return;
+    }
+
+    // Admins don't have role-specific profiles
+    if (profile.role === 'admin' || profile.is_admin) {
+      setLoading(false);
+      setRoleProfile(null);
       return;
     }
 
@@ -69,7 +76,7 @@ export default function ProfileScreen() {
           console.log('No startup profile found for user');
           setRoleProfile(null);
         }
-      } else {
+      } else if (profile.role === 'investor') {
         const { data, error } = await supabase
           .from('investor_profiles')
           .select('*')
@@ -148,10 +155,26 @@ export default function ProfileScreen() {
 
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
-            {profile?.role === 'startup' ? (
-              <Building2 size={32} color={colors.primary} />
+            {roleProfile && profile?.role === 'startup' && (roleProfile as StartupProfile).logo_url ? (
+              <Image
+                source={{ uri: (roleProfile as StartupProfile).logo_url! }}
+                style={styles.avatarImage}
+                resizeMode="cover"
+              />
+            ) : roleProfile && profile?.role === 'investor' && (roleProfile as InvestorProfile).avatar_url ? (
+              <Image
+                source={{ uri: (roleProfile as InvestorProfile).avatar_url! }}
+                style={styles.avatarImage}
+                resizeMode="cover"
+              />
             ) : (
-              <TrendingUp size={32} color={colors.primary} />
+              <Text style={styles.avatarText}>
+                {roleProfile
+                  ? profile?.role === 'startup'
+                    ? (roleProfile as StartupProfile).company_name?.charAt(0).toUpperCase() || '?'
+                    : (roleProfile as InvestorProfile).name?.charAt(0).toUpperCase() || '?'
+                  : '?'}
+              </Text>
             )}
           </View>
 
@@ -160,6 +183,8 @@ export default function ProfileScreen() {
               ? profile?.role === 'startup'
                 ? (roleProfile as StartupProfile).company_name
                 : (roleProfile as InvestorProfile).name
+              : profile?.role === 'admin' || profile?.is_admin
+              ? 'Admin'
               : 'User'}
           </Text>
 
@@ -167,23 +192,26 @@ export default function ProfileScreen() {
 
           <View style={styles.badge}>
             <Text style={styles.badgeText}>
-              {profile?.role === 'startup' ? 'Startup' : 'Investor'}
+              {profile?.role === 'startup' ? 'Startup' : profile?.role === 'investor' ? 'Investor' : 'Admin'}
             </Text>
           </View>
 
           {!roleProfile && (
             <TouchableOpacity
               style={styles.setupButton}
-              onPress={() => {
-                if (profile?.role === 'startup') {
-                  router.push('/auth/setup-startup');
-                } else {
-                  router.push('/auth/setup-investor');
-                }
-              }}>
+              onPress={() => router.push('/settings/edit-profile')}>
               <Text style={styles.setupButtonText}>
                 Complete Your Profile Setup
               </Text>
+            </TouchableOpacity>
+          )}
+
+          {roleProfile && (
+            <TouchableOpacity
+              style={styles.editProfileButton}
+              onPress={() => router.push('/settings/edit-profile')}>
+              <Edit size={18} color={colors.primary} />
+              <Text style={styles.editProfileButtonText}>Edit Profile</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -297,6 +325,17 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {isAdmin && (
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.adminButton}
+              onPress={() => router.push('/admin/dashboard')}>
+              <Shield size={20} color={colors.primary} />
+              <Text style={styles.adminButtonText}>Admin Dashboard</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.section}>
           <TouchableOpacity
             style={styles.signOutButton}
@@ -381,6 +420,16 @@ function createStyles(colors: typeof Colors.light) {
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 16,
+      overflow: 'hidden',
+    },
+    avatarImage: {
+      width: '100%',
+      height: '100%',
+    },
+    avatarText: {
+      fontSize: 32,
+      fontWeight: '700',
+      color: colors.primary,
     },
     name: {
       fontSize: 24,
@@ -465,6 +514,24 @@ function createStyles(colors: typeof Colors.light) {
       fontSize: 14,
       fontWeight: '600',
     },
+    editProfileButton: {
+      marginTop: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: `${colors.primary}15`,
+      paddingHorizontal: 24,
+      paddingVertical: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    editProfileButtonText: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
     sectionHeaderWithButton: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -504,6 +571,22 @@ function createStyles(colors: typeof Colors.light) {
       backgroundColor: `${colors.primary}10`,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    adminButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: `${colors.primary}15`,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    adminButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.primary,
     },
   });
 }

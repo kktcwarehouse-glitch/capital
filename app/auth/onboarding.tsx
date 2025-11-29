@@ -11,7 +11,7 @@ import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
 import { router } from 'expo-router';
-import { Building2, TrendingUp } from 'lucide-react-native';
+import { Building2, TrendingUp, Shield } from 'lucide-react-native';
 import { UserRole } from '@/types';
 
 export default function OnboardingScreen() {
@@ -20,7 +20,7 @@ export default function OnboardingScreen() {
   const styles = createStyles(colors);
 
   const { user, refreshProfile } = useAuth();
-  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
+  const [selectedRole, setSelectedRole] = useState<'startup' | 'investor' | 'admin' | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleContinue = async () => {
@@ -28,24 +28,35 @@ export default function OnboardingScreen() {
 
     setLoading(true);
 
-    const { error } = await supabase.from('profiles').insert({
-      id: user.id,
-      email: user.email!,
-      role: selectedRole,
-    });
+    try {
+      const { error } = await supabase.from('profiles').insert({
+        id: user.id,
+        email: user.email!,
+        role: selectedRole,
+        is_admin: selectedRole === 'admin' ? true : false,
+      });
 
-    if (error) {
-      console.error('Error creating profile:', error);
+      if (error) {
+        console.error('Error creating profile:', error);
+        alert(`Error creating profile: ${error.message}\n\nIf you're trying to create an admin account, make sure the database migration has been run.`);
+        setLoading(false);
+        return;
+      }
+
+      await refreshProfile();
+
+      if (selectedRole === 'startup') {
+        router.replace('/auth/setup-startup');
+      } else if (selectedRole === 'investor') {
+        router.replace('/auth/setup-investor');
+      } else if (selectedRole === 'admin') {
+        // Admins go directly to tabs
+        router.replace('/(tabs)');
+      }
+    } catch (err: any) {
+      console.error('Error:', err);
+      alert(`Error: ${err.message}`);
       setLoading(false);
-      return;
-    }
-
-    await refreshProfile();
-
-    if (selectedRole === 'startup') {
-      router.replace('/auth/setup-startup');
-    } else {
-      router.replace('/auth/setup-investor');
     }
   };
 
@@ -93,6 +104,26 @@ export default function OnboardingScreen() {
             <Text style={styles.roleTitle}>I'm an Investor</Text>
             <Text style={styles.roleDescription}>
               Looking to discover and invest in startups
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.roleCard,
+              selectedRole === 'admin' && styles.roleCardSelected,
+            ]}
+            onPress={() => setSelectedRole('admin')}>
+            <Shield
+              size={48}
+              color={
+                selectedRole === 'admin'
+                  ? colors.primary
+                  : colors.textSecondary
+              }
+            />
+            <Text style={styles.roleTitle}>I'm an Admin</Text>
+            <Text style={styles.roleDescription}>
+              Manage profiles and featured listings
             </Text>
           </TouchableOpacity>
         </View>

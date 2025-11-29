@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, Image } from 'react-native';
 import { Colors } from '@/constants/Colors';
 import { StartupProfile, StartupMedia } from '@/types';
-import { MapPin, TrendingUp, Eye, Heart, Building2 } from 'lucide-react-native';
+import { MapPin, TrendingUp, Eye, Heart, Building2, Star } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 
@@ -97,8 +97,17 @@ export function StartupImageCard({ startup, onPress, showStats = true }: Props) 
     return `$${(amount / 1000).toFixed(0)}K`;
   };
 
+  const isFeatured = Boolean(startup.is_featured);
+  
+  // Debug logging
+  useEffect(() => {
+    if (startup.is_featured) {
+      console.log(`[StartupImageCard] ${startup.company_name} is featured:`, startup.is_featured);
+    }
+  }, [startup.is_featured, startup.company_name]);
+
   return (
-    <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.9}>
+    <TouchableOpacity style={[styles.card, isFeatured && styles.featuredCard]} onPress={handlePress} activeOpacity={0.9}>
       {/* Image Section */}
       <View style={styles.imageContainer}>
         {primaryImage ? (
@@ -108,12 +117,14 @@ export function StartupImageCard({ startup, onPress, showStats = true }: Props) 
             <Building2 size={48} color={colors.textSecondary} />
           </View>
         )}
+        {isFeatured && (
+          <View style={styles.featuredBadge}>
+            <Star size={16} color="#FFD700" fill="#FFD700" />
+            <Text style={styles.featuredBadgeText}>Featured</Text>
+          </View>
+        )}
         {showStats && (
           <View style={styles.statsOverlay}>
-            <View style={styles.statBadge}>
-              <Eye size={14} color="#FFFFFF" />
-              <Text style={styles.statBadgeText}>{stats.views}</Text>
-            </View>
             <View style={styles.statBadge}>
               <Heart size={14} color="#FFFFFF" />
               <Text style={styles.statBadgeText}>{stats.likes}</Text>
@@ -178,6 +189,15 @@ function createStyles(colors: typeof Colors.light) {
       shadowRadius: 12,
       elevation: 4,
     },
+    featuredCard: {
+      borderColor: '#FFD700',
+      borderWidth: 3,
+      shadowColor: '#FFD700',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.6,
+      shadowRadius: 20,
+      elevation: 12,
+    },
     imageContainer: {
       width: '100%',
       height: 240,
@@ -194,6 +214,24 @@ function createStyles(colors: typeof Colors.light) {
       backgroundColor: `${colors.primary}10`,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    featuredBadge: {
+      position: 'absolute',
+      top: 12,
+      left: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(255, 215, 0, 0.9)',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 20,
+      zIndex: 10,
+    },
+    featuredBadgeText: {
+      color: '#000000',
+      fontSize: 12,
+      fontWeight: '700',
     },
     statsOverlay: {
       position: 'absolute',
@@ -283,6 +321,11 @@ function createStyles(colors: typeof Colors.light) {
     },
   });
 }
+
+
+
+
+
 
 
 

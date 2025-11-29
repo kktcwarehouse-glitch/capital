@@ -32,6 +32,7 @@ function RootLayoutNav() {
         <Stack.Screen name="auth/onboarding" />
         <Stack.Screen name="auth/setup-startup" />
         <Stack.Screen name="auth/setup-investor" />
+        <Stack.Screen name="admin/dashboard" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="chat/[id]" />
         <Stack.Screen name="startup/[id]" />

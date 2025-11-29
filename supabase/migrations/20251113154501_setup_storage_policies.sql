@@ -28,6 +28,11 @@ drop policy if exists "Authenticated can upload startup documents" on storage.ob
 drop policy if exists "Users can update own startup documents" on storage.objects;
 drop policy if exists "Users can delete own startup documents" on storage.objects;
 
+drop policy if exists "Authenticated can read chat media" on storage.objects;
+drop policy if exists "Authenticated can upload chat media" on storage.objects;
+drop policy if exists "Users can update own chat media" on storage.objects;
+drop policy if exists "Users can delete own chat media" on storage.objects;
+
 -- ============================================================================
 -- startup-images bucket policies (public bucket)
 -- ============================================================================
@@ -141,6 +146,49 @@ create policy "Users can delete own startup documents"
     bucket_id = 'startup-documents'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- ============================================================================
+-- chat-media bucket policies (public bucket)
+-- ============================================================================
+
+-- Authenticated users can read chat attachments
+create policy "Authenticated can read chat media"
+  on storage.objects for select
+  to authenticated
+  using (bucket_id = 'chat-media');
+
+-- Authenticated users can upload chat attachments
+create policy "Authenticated can upload chat media"
+  on storage.objects for insert
+  to authenticated
+  with check (bucket_id = 'chat-media');
+
+-- Users can update their own chat attachments
+create policy "Users can update own chat media"
+  on storage.objects for update
+  to authenticated
+  using (
+    bucket_id = 'chat-media'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'chat-media'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Users can delete their own chat attachments
+create policy "Users can delete own chat media"
+  on storage.objects for delete
+  to authenticated
+  using (
+    bucket_id = 'chat-media'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+
+
+
+
 
 
 

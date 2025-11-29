@@ -9,6 +9,7 @@ type AuthContextType = {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  isAdmin: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
@@ -33,11 +34,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) {
         console.error('Error fetching profile:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
         return;
       }
 
       if (data) {
+        console.log('Profile fetched successfully:', { id: data.id, email: data.email, role: data.role });
         setProfile(data as UserProfile);
+      } else {
+        console.log('No profile found for user:', userId);
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
@@ -161,6 +166,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const isAdmin = profile?.is_admin === true || profile?.role === 'admin';
+
   return (
     <AuthContext.Provider
       value={{
@@ -168,6 +175,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         profile,
         loading,
+        isAdmin,
         signIn,
         signUp,
         signOut,

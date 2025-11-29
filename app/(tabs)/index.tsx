@@ -9,6 +9,7 @@ import { StartupCard } from '@/components/StartupCard';
 import { StartupImageCard } from '@/components/StartupImageCard';
 import { StartupProfile } from '@/types';
 import { TextInput } from 'react-native';
+import { FILTER_SECTORS } from '@/constants/Sectors';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
@@ -52,8 +53,8 @@ export default function HomeScreen() {
       // Fetch investor insights
       await fetchInvestorInsights();
 
-      // Fetch startups for investors
-      if (profile?.role === 'investor') {
+      // Fetch startups for investors and admins
+      if (profile?.role === 'investor' || profile?.role === 'admin' || profile?.is_admin) {
         await fetchStartups();
       }
     } catch (error) {
@@ -93,6 +94,12 @@ export default function HomeScreen() {
       }
 
       if (data) {
+        // Debug: Log featured startups
+        const featured = data.filter(s => s.is_featured);
+        if (featured.length > 0) {
+          console.log('[Home] Featured startups found:', featured.map(s => s.company_name));
+        }
+        console.log('[Home] Total startups:', data.length, 'Featured:', featured.length);
         setStartups(data);
       }
     } catch (error) {
@@ -234,6 +241,8 @@ export default function HomeScreen() {
               <Text style={styles.tagline}>
                 {profile?.role === 'startup' 
                   ? 'Track your performance and understand investor trends'
+                  : profile?.role === 'admin' || profile?.is_admin
+                  ? 'Manage profiles and featured listings'
                   : 'Discover promising startups and investment opportunities'}
               </Text>
             </View>
@@ -270,7 +279,7 @@ export default function HomeScreen() {
                   <Text style={styles.filterLabel}>Sector</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
                     <View style={styles.filterPills}>
-                      {['All', 'FinTech', 'HealthTech', 'EdTech', 'E-commerce', 'SaaS', 'AI/ML', 'Blockchain'].map((sector) => (
+                      {FILTER_SECTORS.map((sector) => (
                         <TouchableOpacity
                           key={sector}
                           style={[
@@ -373,29 +382,30 @@ export default function HomeScreen() {
                 <Text style={styles.sectionSubtitle}>Track your engagement metrics</Text>
               </View>
             </View>
-            <View style={styles.analyticsGrid}>
+            <View style={styles.dashboardContainer}>
               <View style={styles.analyticsCard}>
-                <View style={styles.analyticsIconContainer}>
-                  <Eye size={28} color={colors.primary} />
+                <View style={styles.analyticsCardHeader}>
+                  <View style={[styles.analyticsIconContainer, { backgroundColor: `${colors.primary}15` }]}>
+                    <Eye size={24} color={colors.primary} />
+                  </View>
+                  <View style={styles.analyticsCardHeaderText}>
+                    <Text style={styles.analyticsValue}>{analytics.views}</Text>
+                    <Text style={styles.analyticsLabel}>Profile Views</Text>
+                  </View>
                 </View>
-                <Text style={styles.analyticsValue}>{analytics.views}</Text>
-                <Text style={styles.analyticsLabel}>Profile Views</Text>
-                <Text style={styles.analyticsDescription}>Investors checking you out</Text>
+                <Text style={styles.analyticsDescription}>Investors viewing your profile</Text>
               </View>
+              
               <View style={styles.analyticsCard}>
-                <View style={styles.analyticsIconContainer}>
-                  <MessageCircle size={28} color={colors.primary} />
+                <View style={styles.analyticsCardHeader}>
+                  <View style={[styles.analyticsIconContainer, { backgroundColor: `${colors.primary}15` }]}>
+                    <Heart size={24} color={colors.primary} />
+                  </View>
+                  <View style={styles.analyticsCardHeaderText}>
+                    <Text style={styles.analyticsValue}>{analytics.favorites}</Text>
+                    <Text style={styles.analyticsLabel}>Favorites</Text>
+                  </View>
                 </View>
-                <Text style={styles.analyticsValue}>{analytics.messages}</Text>
-                <Text style={styles.analyticsLabel}>Messages</Text>
-                <Text style={styles.analyticsDescription}>Active conversations</Text>
-              </View>
-              <View style={styles.analyticsCard}>
-                <View style={styles.analyticsIconContainer}>
-                  <Heart size={28} color={colors.primary} />
-                </View>
-                <Text style={styles.analyticsValue}>{analytics.favorites}</Text>
-                <Text style={styles.analyticsLabel}>Favorites</Text>
                 <Text style={styles.analyticsDescription}>Saved by investors</Text>
               </View>
             </View>
@@ -647,52 +657,53 @@ function createStyles(colors: typeof Colors.light) {
       color: colors.textSecondary,
       textAlign: 'center',
     },
-    analyticsGrid: {
-      flexDirection: 'row',
+    dashboardContainer: {
       gap: 12,
     },
     analyticsCard: {
-      flex: 1,
       backgroundColor: colors.card,
       borderRadius: 16,
       padding: 20,
-      alignItems: 'center',
       borderWidth: 1,
       borderColor: colors.border,
-      gap: 12,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.05,
       shadowRadius: 8,
       elevation: 2,
     },
+    analyticsCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+      marginBottom: 12,
+    },
+    analyticsCardHeaderText: {
+      flex: 1,
+    },
     analyticsIconContainer: {
-      width: 56,
-      height: 56,
-      borderRadius: 16,
-      backgroundColor: `${colors.primary}15`,
+      width: 48,
+      height: 48,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: 4,
     },
     analyticsValue: {
-      fontSize: 32,
+      fontSize: 28,
       fontWeight: '700',
       color: colors.text,
-      marginTop: 4,
+      lineHeight: 32,
     },
     analyticsLabel: {
       fontSize: 14,
       fontWeight: '600',
-      color: colors.text,
-      textAlign: 'center',
-      marginTop: 4,
+      color: colors.textSecondary,
+      marginTop: 2,
     },
     analyticsDescription: {
-      fontSize: 11,
+      fontSize: 12,
       color: colors.textSecondary,
-      textAlign: 'center',
-      marginTop: 2,
+      lineHeight: 16,
     },
     insightCard: {
       backgroundColor: colors.card,

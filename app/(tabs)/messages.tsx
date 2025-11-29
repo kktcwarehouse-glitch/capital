@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
+import { StartupProfile, InvestorProfile, Message } from '@/types';
 import { router } from 'expo-router';
 import { MessageCircle, User } from 'lucide-react-native';
 
@@ -29,69 +30,119 @@ export default function MessagesScreen() {
   const colors = colorScheme === 'dark' ? Colors.dark : Colors.light;
   const styles = createStyles(colors);
 
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) {
-      fetchConversations();
-      subscribeToMessages();
-    }
-  }, [user]);
-
-  const fetchConversations = async () => {
     if (!user) return;
 
+    fetchConversations();
+    const unsubscribe = subscribeToMessages();
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user]);
+
+  const getMessagePreview = (msg: Message) => {
+    if (msg.content && msg.content.trim().length > 0) {
+      return msg.content;
+    }
+
+    if (msg.attachment_type === 'image') {
+      return '📷 Photo';
+    }
+
+    if (msg.attachment_type === 'video') {
+      return '🎥 Video';
+    }
+
+    if (msg.attachment_type === 'document') {
+      return '📄 Document';
+    }
+
+    return 'New message';
+  };
+
+  const fetchConversations = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      const { data: messages } = await supabase
+      const { data: messages, error: messageError } = await supabase
         .from('messages')
         .select('*')
         .or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
 
-      if (messages) {
-        const conversationMap = new Map<string, any>();
+      if (messageError) {
+        throw messageError;
+      }
 
-        for (const msg of messages) {
-          const otherUserId = msg.sender_id === user.id ? msg.recipient_id : msg.sender_id;
+      if (!messages) {
+        setConversations([]);
+        return;
+      }
 
-          if (!conversationMap.has(otherUserId)) {
-            const { data: otherProfile } = await supabase
-              .from('profiles')
-              .select('*, startup_profiles(*), investor_profiles(*)')
-              .eq('id', otherUserId)
-              .maybeSingle();
+      const uniqueUserIds = Array.from(
+        new Set(
+          messages.map((msg) =>
+            msg.sender_id === user.id ? msg.recipient_id : msg.sender_id
+          )
+        )
+      );
 
-            if (otherProfile) {
-              let name = 'User';
-              if (otherProfile.role === 'startup' && otherProfile.startup_profiles?.[0]) {
-                name = otherProfile.startup_profiles[0].company_name;
-              } else if (otherProfile.role === 'investor' && otherProfile.investor_profiles?.[0]) {
-                name = otherProfile.investor_profiles[0].name;
-              }
+      const profileNames = new Map<string, string>();
 
-              const { count } = await supabase
-                .from('messages')
-                .select('*', { count: 'exact', head: true })
-                .eq('sender_id', otherUserId)
-                .eq('recipient_id', user.id)
-                .eq('read', false);
+      if (uniqueUserIds.length > 0) {
+        const [startupResult, investorResult] = await Promise.all([
+          supabase
+            .from('startup_profiles')
+            .select('user_id, company_name')
+            .in('user_id', uniqueUserIds),
+          supabase
+            .from('investor_profiles')
+            .select('user_id, name')
+            .in('user_id', uniqueUserIds),
+        ]);
 
-              conversationMap.set(otherUserId, {
-                id: otherUserId,
-                otherUserId,
-                otherUserName: name,
-                lastMessage: msg.content,
-                lastMessageTime: msg.created_at,
-                unreadCount: count || 0,
-              });
-            }
+        startupResult.data?.forEach((profile: Pick<StartupProfile, 'user_id' | 'company_name'>) => {
+          profileNames.set(profile.user_id, profile.company_name);
+        });
+
+        investorResult.data?.forEach((profile: Pick<InvestorProfile, 'user_id' | 'name'>) => {
+          if (!profileNames.has(profile.user_id)) {
+            profileNames.set(profile.user_id, profile.name);
           }
+        });
+      }
+
+      const conversationMap = new Map<string, Conversation>();
+
+      for (const msg of messages as Message[]) {
+        const otherUserId =
+          msg.sender_id === user.id ? msg.recipient_id : msg.sender_id;
+
+        if (!conversationMap.has(otherUserId)) {
+          conversationMap.set(otherUserId, {
+            id: otherUserId,
+            otherUserId,
+            otherUserName: profileNames.get(otherUserId) || 'User',
+            lastMessage: getMessagePreview(msg),
+            lastMessageTime: msg.created_at,
+            unreadCount: 0,
+          });
         }
 
-        setConversations(Array.from(conversationMap.values()));
+        if (msg.sender_id === otherUserId && msg.recipient_id === user.id && !msg.read) {
+          conversationMap.get(otherUserId)!.unreadCount += 1;
+        }
       }
+
+      setConversations(Array.from(conversationMap.values()));
     } catch (error) {
       console.error('Error fetching conversations:', error);
     } finally {
@@ -100,12 +151,16 @@ export default function MessagesScreen() {
   };
 
   const subscribeToMessages = () => {
+    if (!user) {
+      return () => {};
+    }
+
     const channel = supabase
-      .channel('messages-channel')
+      .channel(`messages-feed-${user.id}`)
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'messages',
         },

@@ -16,17 +16,10 @@ import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
 import { router } from 'expo-router';
 
+import { ALL_SECTORS } from '@/constants/Sectors';
+
 const stages = ['Idea', 'Pre-seed', 'Seed', 'Series A', 'Series B', 'Series C+'];
-const sectors = [
-  'FinTech',
-  'HealthTech',
-  'EdTech',
-  'E-commerce',
-  'SaaS',
-  'AI/ML',
-  'Blockchain',
-  'Other',
-];
+const sectors = ALL_SECTORS;
 
 export default function SetupStartupScreen() {
   const colorScheme = useColorScheme();

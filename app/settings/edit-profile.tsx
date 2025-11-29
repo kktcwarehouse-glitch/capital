@@ -10,16 +10,22 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Image,
+  Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
 import { router } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
-import { StartupProfile, InvestorProfile } from '@/types';
+import { ArrowLeft, Upload, X, Plus, Trash2, FileText } from 'lucide-react-native';
+import { StartupProfile, InvestorProfile, Founder } from '@/types';
+import * as ImagePicker from 'expo-image-picker';
+import { ALL_SECTORS } from '@/constants/Sectors';
+import * as DocumentPicker from 'expo-document-picker';
 
-const sectors = ['FinTech', 'HealthTech', 'EdTech', 'E-commerce', 'SaaS', 'AI/ML', 'Blockchain', 'Other'];
+const sectors = ALL_SECTORS;
 const stages = ['Idea', 'Pre-seed', 'Seed', 'Series A', 'Series B', 'Series C+'];
 const investorTypes = ['Angel Investor', 'VC Fund', 'Corporate VC', 'Family Office', 'Other'];
 
@@ -36,6 +42,10 @@ export default function EditProfileScreen() {
   const [startupData, setStartupData] = useState<Partial<StartupProfile>>({});
   const [investorData, setInvestorData] = useState<Partial<InvestorProfile>>({});
   const [selectedSectors, setSelectedSectors] = useState<string[]>([]);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [founders, setFounders] = useState<Founder[]>([]);
+  const [uploadingFounderPhoto, setUploadingFounderPhoto] = useState<number | null>(null);
+  const [uploadingPitchDeck, setUploadingPitchDeck] = useState(false);
 
   useEffect(() => {
     fetchProfileData();
@@ -54,6 +64,12 @@ export default function EditProfileScreen() {
 
         if (data) {
           setStartupData(data);
+          // Parse founders from JSONB
+          if (data.founders && Array.isArray(data.founders)) {
+            setFounders(data.founders);
+          } else {
+            setFounders([]);
+          }
         }
       } else {
         const { data } = await supabase
@@ -79,6 +95,218 @@ export default function EditProfileScreen() {
       setSelectedSectors(selectedSectors.filter((s) => s !== sector));
     } else {
       setSelectedSectors([...selectedSectors, sector]);
+    }
+  };
+
+  const pickLogo = async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Not Available', 'Image upload is not available in web preview. Please use a mobile device or development build.');
+      return;
+    }
+
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please grant camera roll permissions to upload images.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      await uploadLogo(asset.uri);
+    }
+  };
+
+  const uploadLogo = async (uri: string) => {
+    if (!user || !profile) return;
+
+    setUploadingLogo(true);
+
+    try {
+      const response = await fetch(uri);
+      const arrayBuffer = await response.arrayBuffer();
+      const fileBytes = new Uint8Array(arrayBuffer);
+
+      const bucketName = profile.role === 'startup' ? 'startup-images' : 'startup-images'; // Using same bucket for now
+      const filePath = `${user.id}/logo-${Date.now()}.jpg`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(bucketName)
+        .upload(filePath, fileBytes, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        Alert.alert('Error', 'Failed to upload logo');
+        setUploadingLogo(false);
+        return;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from(bucketName)
+        .getPublicUrl(filePath);
+
+      if (profile.role === 'startup') {
+        setStartupData({ ...startupData, logo_url: urlData.publicUrl });
+      } else {
+        setInvestorData({ ...investorData, avatar_url: urlData.publicUrl });
+      }
+
+      Alert.alert('Success', 'Logo uploaded successfully');
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      Alert.alert('Error', 'Failed to upload logo');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const removeLogo = () => {
+    if (profile?.role === 'startup') {
+      setStartupData({ ...startupData, logo_url: undefined });
+    } else {
+      setInvestorData({ ...investorData, avatar_url: undefined });
+    }
+  };
+
+  const pickPitchDeck = async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Not Available', 'Document upload is not available in web preview. Please use a mobile device or development build.');
+      return;
+    }
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/vnd.ms-powerpoint'],
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await uploadPitchDeck(result.assets[0].uri, result.assets[0].name || 'pitch-deck.pdf');
+      }
+    } catch (error) {
+      console.error('Error picking document:', error);
+      Alert.alert('Error', 'Failed to pick document');
+    }
+  };
+
+  const uploadPitchDeck = async (uri: string, fileName: string) => {
+    if (!user || !profile || profile.role !== 'startup') return;
+
+    setUploadingPitchDeck(true);
+
+    try {
+      const response = await fetch(uri);
+      const arrayBuffer = await response.arrayBuffer();
+      const fileBytes = new Uint8Array(arrayBuffer);
+
+      const bucketName = 'startup-documents';
+      const filePath = `${user.id}/pitch-deck-${Date.now()}-${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(bucketName)
+        .upload(filePath, fileBytes, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        Alert.alert('Error', 'Failed to upload pitch deck');
+        setUploadingPitchDeck(false);
+        return;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from(bucketName)
+        .getPublicUrl(filePath);
+
+      setStartupData({ ...startupData, pitch_deck_url: urlData.publicUrl });
+      Alert.alert('Success', 'Pitch deck uploaded successfully');
+    } catch (error) {
+      console.error('Error uploading pitch deck:', error);
+      Alert.alert('Error', 'Failed to upload pitch deck');
+    } finally {
+      setUploadingPitchDeck(false);
+    }
+  };
+
+  const removePitchDeck = () => {
+    setStartupData({ ...startupData, pitch_deck_url: undefined });
+  };
+
+  const addFounder = () => {
+    setFounders([...founders, { name: '', previous_experience: '', key_roles: '' }]);
+  };
+
+  const removeFounder = (index: number) => {
+    setFounders(founders.filter((_, i) => i !== index));
+  };
+
+  const updateFounder = (index: number, field: keyof Founder, value: string) => {
+    const updated = [...founders];
+    updated[index] = { ...updated[index], [field]: value };
+    setFounders(updated);
+  };
+
+  const pickFounderPhoto = async (index: number) => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Not Available', 'Image upload is not available in web preview.');
+      return;
+    }
+
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please grant camera roll permissions.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0] && user) {
+      setUploadingFounderPhoto(index);
+      try {
+        const response = await fetch(result.assets[0].uri);
+        const arrayBuffer = await response.arrayBuffer();
+        const fileBytes = new Uint8Array(arrayBuffer);
+        const filePath = `${user.id}/founder-${Date.now()}-${index}.jpg`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('startup-images')
+          .upload(filePath, fileBytes, {
+            contentType: 'image/jpeg',
+            upsert: true,
+          });
+
+        if (uploadError) {
+          Alert.alert('Error', 'Failed to upload photo');
+          return;
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('startup-images')
+          .getPublicUrl(filePath);
+
+        updateFounder(index, 'photo_url', urlData.publicUrl);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to upload photo');
+      } finally {
+        setUploadingFounderPhoto(null);
+      }
     }
   };
 
@@ -120,6 +348,19 @@ export default function EditProfileScreen() {
         if (startupData.website) profileData.website = startupData.website;
         if (startupData.team_size) profileData.team_size = startupData.team_size;
         if (startupData.founded_year) profileData.founded_year = startupData.founded_year;
+        if (startupData.logo_url !== undefined) profileData.logo_url = startupData.logo_url || null;
+        if (startupData.pitch_deck_url !== undefined) profileData.pitch_deck_url = startupData.pitch_deck_url || null;
+        // Founders
+        profileData.founders = founders.length > 0 ? founders : [];
+        // Business metrics
+        if (startupData.monthly_recurring_revenue !== undefined) profileData.monthly_recurring_revenue = startupData.monthly_recurring_revenue || null;
+        if (startupData.growth_percentage !== undefined) profileData.growth_percentage = startupData.growth_percentage || null;
+        if (startupData.growth_period_months !== undefined) profileData.growth_period_months = startupData.growth_period_months || null;
+        if (startupData.important_partnerships !== undefined) profileData.important_partnerships = startupData.important_partnerships || null;
+        // Investment details
+        if (startupData.equity_offered !== undefined) profileData.equity_offered = startupData.equity_offered || null;
+        if (startupData.company_valuation_pre_money !== undefined) profileData.company_valuation_pre_money = startupData.company_valuation_pre_money || null;
+        if (startupData.minimum_investment !== undefined) profileData.minimum_investment = startupData.minimum_investment || null;
 
         console.log('Upserting startup profile:', { user_id: profile.id, profileData });
         
@@ -157,6 +398,7 @@ export default function EditProfileScreen() {
         if (investorData.investment_range_min !== undefined) profileData.investment_range_min = investorData.investment_range_min;
         if (investorData.investment_range_max !== undefined) profileData.investment_range_max = investorData.investment_range_max;
         if (investorData.bio) profileData.bio = investorData.bio;
+        if (investorData.avatar_url !== undefined) profileData.avatar_url = investorData.avatar_url || null;
 
         console.log('Upserting investor profile:', { user_id: profile.id, profileData });
         
@@ -222,6 +464,43 @@ export default function EditProfileScreen() {
 
           {profile?.role === 'startup' ? (
             <>
+              <View style={styles.field}>
+                <Text style={styles.label}>Company Logo</Text>
+                <View style={styles.logoSection}>
+                  <View style={styles.logoContainer}>
+                    {startupData.logo_url ? (
+                      <>
+                        <Image
+                          source={{ uri: startupData.logo_url }}
+                          style={styles.logoImage}
+                          resizeMode="cover"
+                        />
+                        <TouchableOpacity
+                          style={styles.removeLogoButton}
+                          onPress={removeLogo}>
+                          <X size={16} color="#FFFFFF" />
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <View style={styles.logoPlaceholder}>
+                        <Text style={styles.logoPlaceholderText}>
+                          {startupData.company_name?.charAt(0).toUpperCase() || '?'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.uploadLogoButton, uploadingLogo && styles.uploadLogoButtonDisabled]}
+                    onPress={pickLogo}
+                    disabled={uploadingLogo}>
+                    <Upload size={16} color={colors.primary} />
+                    <Text style={styles.uploadLogoButtonText}>
+                      {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               <View style={styles.field}>
                 <Text style={styles.label}>Company Name *</Text>
                 <TextInput
@@ -348,6 +627,53 @@ export default function EditProfileScreen() {
                 />
               </View>
 
+              {/* Pitch Deck Section */}
+              <View style={styles.field}>
+                <Text style={styles.label}>Pitch Deck</Text>
+                {startupData.pitch_deck_url ? (
+                  <View style={styles.pitchDeckContainer}>
+                    <View style={styles.pitchDeckInfo}>
+                      <FileText size={20} color={colors.primary} />
+                      <Text style={styles.pitchDeckText} numberOfLines={1}>
+                        Pitch Deck Uploaded
+                      </Text>
+                    </View>
+                    <View style={styles.pitchDeckActions}>
+                      <TouchableOpacity
+                        style={styles.pitchDeckButton}
+                        onPress={() => {
+                          if (startupData.pitch_deck_url) {
+                            Linking.openURL(startupData.pitch_deck_url);
+                          }
+                        }}>
+                        <Text style={styles.pitchDeckButtonText}>View</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.pitchDeckButton, styles.pitchDeckButtonRemove]}
+                        onPress={removePitchDeck}>
+                        <X size={16} color={colors.error} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.uploadPitchDeckButton, uploadingPitchDeck && styles.uploadPitchDeckButtonDisabled]}
+                    onPress={pickPitchDeck}
+                    disabled={uploadingPitchDeck}>
+                    {uploadingPitchDeck ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <>
+                        <Upload size={20} color={colors.primary} />
+                        <Text style={styles.uploadPitchDeckButtonText}>
+                          Upload Pitch Deck (PDF, PPT)
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+
               <View style={styles.row}>
                 <View style={[styles.field, styles.flex1]}>
                   <Text style={styles.label}>Team Size</Text>
@@ -383,9 +709,294 @@ export default function EditProfileScreen() {
                   />
                 </View>
               </View>
+
+              {/* Founders Section */}
+              <View style={styles.sectionDivider} />
+              <Text style={styles.sectionHeaderText}>Founders</Text>
+              {founders.map((founder, index) => (
+                <View key={index} style={styles.founderCard}>
+                  <View style={styles.founderHeader}>
+                    <Text style={styles.founderNumber}>Founder {index + 1}</Text>
+                    {founders.length > 1 && (
+                      <TouchableOpacity
+                        style={styles.removeFounderButton}
+                        onPress={() => removeFounder(index)}>
+                        <Trash2 size={18} color={colors.error} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  
+                  <View style={styles.founderPhotoSection}>
+                    <TouchableOpacity
+                      style={styles.founderPhotoContainer}
+                      onPress={() => pickFounderPhoto(index)}>
+                      {founder.photo_url ? (
+                        <Image
+                          source={{ uri: founder.photo_url }}
+                          style={styles.founderPhoto}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.founderPhotoPlaceholder}>
+                          <Text style={styles.founderPhotoPlaceholderText}>
+                            {founder.name?.charAt(0).toUpperCase() || '+'}
+                          </Text>
+                        </View>
+                      )}
+                      {uploadingFounderPhoto === index && (
+                        <View style={styles.uploadingOverlay}>
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                    <Text style={styles.founderPhotoLabel}>Tap to add photo</Text>
+                  </View>
+
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Name *</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={founder.name || ''}
+                      onChangeText={(text) => updateFounder(index, 'name', text)}
+                      placeholder="Founder name"
+                      placeholderTextColor={colors.textSecondary}
+                    />
+                  </View>
+
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Previous Experience</Text>
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      value={founder.previous_experience || ''}
+                      onChangeText={(text) => updateFounder(index, 'previous_experience', text)}
+                      placeholder="Previous companies, roles, achievements..."
+                      placeholderTextColor={colors.textSecondary}
+                      multiline
+                      numberOfLines={3}
+                    />
+                  </View>
+
+                  <View style={styles.field}>
+                    <Text style={styles.label}>Key Roles</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={founder.key_roles || ''}
+                      onChangeText={(text) => updateFounder(index, 'key_roles', text)}
+                      placeholder="e.g., CEO, CTO, Product Lead"
+                      placeholderTextColor={colors.textSecondary}
+                    />
+                  </View>
+                </View>
+              ))}
+              
+              <TouchableOpacity
+                style={styles.addFounderButton}
+                onPress={addFounder}>
+                <Plus size={20} color={colors.primary} />
+                <Text style={styles.addFounderButtonText}>Add Founder</Text>
+              </TouchableOpacity>
+
+              {/* Business Metrics Section */}
+              <View style={styles.sectionDivider} />
+              <Text style={styles.sectionHeaderText}>Business Metrics</Text>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Monthly Recurring Revenue (MRR) - USD</Text>
+                <TextInput
+                  style={styles.input}
+                  value={startupData.monthly_recurring_revenue?.toString() || ''}
+                  onChangeText={(text) =>
+                    setStartupData({
+                      ...startupData,
+                      monthly_recurring_revenue: parseFloat(text) || undefined,
+                    })
+                  }
+                  placeholder="e.g., 50000"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.row}>
+                <View style={[styles.field, styles.flex1]}>
+                  <Text style={styles.label}>Growth Percentage (%)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={startupData.growth_percentage?.toString() || ''}
+                    onChangeText={(text) =>
+                      setStartupData({
+                        ...startupData,
+                        growth_percentage: parseFloat(text) || undefined,
+                      })
+                    }
+                    placeholder="e.g., 25"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="numeric"
+                  />
+                </View>
+
+                <View style={[styles.field, styles.flex1]}>
+                  <Text style={styles.label}>Growth Period (months)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={startupData.growth_period_months?.toString() || ''}
+                    onChangeText={(text) => {
+                      const months = parseInt(text);
+                      if (months >= 6 && months <= 12) {
+                        setStartupData({
+                          ...startupData,
+                          growth_period_months: months,
+                        });
+                      } else if (text === '') {
+                        setStartupData({
+                          ...startupData,
+                          growth_period_months: undefined,
+                        });
+                      }
+                    }}
+                    placeholder="6-12"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Important Partnerships</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={startupData.important_partnerships || ''}
+                  onChangeText={(text) =>
+                    setStartupData({ ...startupData, important_partnerships: text })
+                  }
+                  placeholder="List key partnerships, clients, or strategic alliances..."
+                  placeholderTextColor={colors.textSecondary}
+                  multiline
+                  numberOfLines={4}
+                />
+              </View>
+
+              {/* Investment Details Section */}
+              <View style={styles.sectionDivider} />
+              <Text style={styles.sectionHeaderText}>Investment Details</Text>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Amount Needed (USD)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={startupData.funding_goal?.toString() || ''}
+                  onChangeText={(text) =>
+                    setStartupData({
+                      ...startupData,
+                      funding_goal: parseFloat(text) || 0,
+                    })
+                  }
+                  placeholder="e.g., 500000"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.row}>
+                <View style={[styles.field, styles.flex1]}>
+                  <Text style={styles.label}>Equity Offered (%)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={startupData.equity_offered?.toString() || ''}
+                    onChangeText={(text) => {
+                      const equity = parseFloat(text);
+                      if (equity >= 0 && equity <= 100) {
+                        setStartupData({
+                          ...startupData,
+                          equity_offered: equity,
+                        });
+                      } else if (text === '') {
+                        setStartupData({
+                          ...startupData,
+                          equity_offered: undefined,
+                        });
+                      }
+                    }}
+                    placeholder="e.g., 20"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="numeric"
+                  />
+                </View>
+
+                <View style={[styles.field, styles.flex1]}>
+                  <Text style={styles.label}>Company Valuation (Pre-money) - USD</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={startupData.company_valuation_pre_money?.toString() || ''}
+                    onChangeText={(text) =>
+                      setStartupData({
+                        ...startupData,
+                        company_valuation_pre_money: parseFloat(text) || undefined,
+                      })
+                    }
+                    placeholder="e.g., 2000000"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Minimum Investment (USD)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={startupData.minimum_investment?.toString() || ''}
+                  onChangeText={(text) =>
+                    setStartupData({
+                      ...startupData,
+                      minimum_investment: parseFloat(text) || undefined,
+                    })
+                  }
+                  placeholder="e.g., 25000"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="numeric"
+                />
+              </View>
             </>
           ) : (
             <>
+              <View style={styles.field}>
+                <Text style={styles.label}>Profile Picture</Text>
+                <View style={styles.logoSection}>
+                  <View style={styles.logoContainer}>
+                    {investorData.avatar_url ? (
+                      <>
+                        <Image
+                          source={{ uri: investorData.avatar_url }}
+                          style={styles.logoImage}
+                          resizeMode="cover"
+                        />
+                        <TouchableOpacity
+                          style={styles.removeLogoButton}
+                          onPress={removeLogo}>
+                          <X size={16} color="#FFFFFF" />
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <View style={styles.logoPlaceholder}>
+                        <Text style={styles.logoPlaceholderText}>
+                          {investorData.name?.charAt(0).toUpperCase() || '?'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.uploadLogoButton, uploadingLogo && styles.uploadLogoButtonDisabled]}
+                    onPress={pickLogo}
+                    disabled={uploadingLogo}>
+                    <Upload size={16} color={colors.primary} />
+                    <Text style={styles.uploadLogoButtonText}>
+                      {uploadingLogo ? 'Uploading...' : 'Upload Photo'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               <View style={styles.field}>
                 <Text style={styles.label}>Full Name *</Text>
                 <TextInput
@@ -655,6 +1266,224 @@ function createStyles(colors: typeof Colors.light) {
       backgroundColor: `${colors.error}15`,
       borderRadius: 8,
       marginBottom: 16,
+    },
+    logoSection: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+    },
+    logoContainer: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      position: 'relative',
+    },
+    logoImage: {
+      width: '100%',
+      height: '100%',
+    },
+    logoPlaceholder: {
+      width: '100%',
+      height: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    logoPlaceholderText: {
+      color: '#FFFFFF',
+      fontSize: 32,
+      fontWeight: '700',
+    },
+    removeLogoButton: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      backgroundColor: colors.error,
+      borderRadius: 12,
+      width: 24,
+      height: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    uploadLogoButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: `${colors.primary}15`,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 12,
+      padding: 12,
+    },
+    uploadLogoButtonDisabled: {
+      opacity: 0.5,
+    },
+    uploadLogoButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    pitchDeckContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: 12,
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    pitchDeckInfo: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginLeft: 12,
+    },
+    pitchDeckText: {
+      fontSize: 14,
+      color: colors.text,
+      fontWeight: '500',
+      flex: 1,
+    },
+    pitchDeckActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    pitchDeckButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      backgroundColor: `${colors.primary}15`,
+      borderRadius: 8,
+    },
+    pitchDeckButtonText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    pitchDeckButtonRemove: {
+      backgroundColor: 'transparent',
+      padding: 4,
+    },
+    uploadPitchDeckButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: `${colors.primary}15`,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 12,
+      padding: 12,
+      borderStyle: 'dashed',
+    },
+    uploadPitchDeckButtonDisabled: {
+      opacity: 0.5,
+    },
+    uploadPitchDeckButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    sectionDivider: {
+      height: 1,
+      backgroundColor: colors.border,
+      marginVertical: 24,
+    },
+    sectionHeaderText: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 16,
+    },
+    founderCard: {
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: 16,
+    },
+    founderHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    founderNumber: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    removeFounderButton: {
+      padding: 4,
+    },
+    founderPhotoSection: {
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    founderPhotoContainer: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      backgroundColor: `${colors.primary}20`,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      marginBottom: 8,
+      position: 'relative',
+    },
+    founderPhoto: {
+      width: '100%',
+      height: '100%',
+    },
+    founderPhotoPlaceholder: {
+      width: '100%',
+      height: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    founderPhotoPlaceholderText: {
+      fontSize: 32,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    uploadingOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    founderPhotoLabel: {
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    addFounderButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: `${colors.primary}15`,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 24,
+    },
+    addFounderButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.primary,
     },
   });
 }
